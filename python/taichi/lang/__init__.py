@@ -21,7 +21,8 @@ from taichi.lang import _random, impl, types
 from taichi.lang._ndarray import ScalarNdarray
 from taichi.lang.any_array import AnyArray, AnyArrayAccess
 from taichi.lang.enums import Layout
-from taichi.lang.exception import InvalidOperationError, TaichiSyntaxError
+from taichi.lang.exception import (InvalidOperationError,
+                                   TaichiCompilationError, TaichiSyntaxError)
 from taichi.lang.expr import Expr, make_expr_group
 from taichi.lang.field import Field, ScalarField
 from taichi.lang.impl import (axes, begin_frontend_if,
@@ -472,9 +473,8 @@ def check_version():
     try:
         payload = json.dumps(payload)
         payload = payload.encode()
-        req = request.Request(
-            'http://ec2-54-90-48-192.compute-1.amazonaws.com/check_version',
-            method='POST')
+        req = request.Request('http://metadata.taichi.graphics/check_version',
+                              method='POST')
         req.add_header('Content-Type', 'application/json')
         with request.urlopen(req, data=payload, timeout=3) as response:
             response = json.loads(response.read().decode('utf-8'))
@@ -528,13 +528,19 @@ def init(arch=None,
         with open(timestamp_path, 'r') as f:
             last_time = f.readlines()[0].rstrip()
         if cur_date.strftime('%Y-%m-%d') > last_time:
-            check_version()
+            try:
+                check_version()
+            except Exception as error:
+                print('Checking lastest version failed:', error)
             with open(timestamp_path, 'w') as f:
                 f.write((cur_date +
                          datetime.timedelta(days=7)).strftime('%Y-%m-%d'))
                 f.truncate()
     else:
-        check_version()
+        try:
+            check_version()
+        except Exception as error:
+            print('Checking lastest version failed:', error)
         with open(timestamp_path, 'w') as f:
             f.write(
                 (cur_date + datetime.timedelta(days=7)).strftime('%Y-%m-%d'))
@@ -634,7 +640,7 @@ def init(arch=None,
     if env_arch is not None:
         ti.info(f'Following TI_ARCH setting up for arch={env_arch}')
         arch = _ti_core.arch_from_name(env_arch)
-    ti.cfg.arch = adaptive_arch_select(arch, enable_fallback)
+    ti.cfg.arch = adaptive_arch_select(arch, enable_fallback, ti.cfg.use_gles)
     if ti.cfg.arch == cc:
         _ti_core.set_tmp_dir(locale_encode(prepare_sandbox()))
     print(f'[Taichi] Starting on arch={_ti_core.arch_name(ti.cfg.arch)}')
@@ -1104,19 +1110,23 @@ def stat_write(key, value):
         yaml.dump(data, f, Dumper=yaml.SafeDumper)
 
 
-def is_arch_supported(arch):
+def is_arch_supported(arch, use_gles=False):
     """Checks whether an arch is supported on the machine.
 
     Args:
         arch (taichi_core.Arch): Specified arch.
+        use_gles (bool): If True, check is GLES is available otherwise
+          check if GLSL is available. Only effective when `arch` is `ti.opengl`.
+          Default is `False`.
 
     Returns:
         bool: Whether `arch` is supported on the machine.
     """
+
     arch_table = {
         cuda: _ti_core.with_cuda,
         metal: _ti_core.with_metal,
-        opengl: _ti_core.with_opengl,
+        opengl: functools.partial(_ti_core.with_opengl, use_gles),
         cc: _ti_core.with_cc,
         vulkan: _ti_core.with_vulkan,
         wasm: lambda: True,
@@ -1134,13 +1144,13 @@ def is_arch_supported(arch):
         return False
 
 
-def adaptive_arch_select(arch, enable_fallback):
+def adaptive_arch_select(arch, enable_fallback, use_gles):
     if arch is None:
         return cpu
     if not isinstance(arch, (list, tuple)):
         arch = [arch]
     for a in arch:
-        if is_arch_supported(a):
+        if is_arch_supported(a, use_gles):
             return a
     if not enable_fallback:
         raise RuntimeError(f'Arch={arch} is not supported')
@@ -1192,7 +1202,7 @@ def all_archs_with(**kwargs):
                 can_run_on.register(lambda arch: is_extension_supported(
                     arch, extension.data64))
 
-            for arch in ti.testing.expected_archs():
+            for arch in ti._testing.expected_archs():
                 if can_run_on(arch):
                     print(f'Running test on arch={arch}')
                     ti.init(arch=arch, **kwargs)

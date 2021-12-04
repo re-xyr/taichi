@@ -2,10 +2,12 @@ from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 
 from taichi.lang import impl, kernel_impl
-from taichi.lang._ndarray import Ndarray
+from taichi.lang._ndarray import ScalarNdarray
+from taichi.lang.enums import Layout
 from taichi.lang.field import ScalarField
 from taichi.lang.matrix import MatrixField, MatrixNdarray, VectorNdarray
 from taichi.type.annotations import ArgAnyArray, template
+from taichi.type.primitive_types import f32
 
 
 class KernelTemplate:
@@ -84,7 +86,6 @@ class Module:
         self._arch = arch
         self._kernels = []
         self._fields = {}
-        self._ndarrays = {}
         rtm = impl.get_runtime()
         rtm._finalize_root_fb_for_aot()
         self._aot_builder = rtm.prog.make_aot_module_builder(arch)
@@ -121,42 +122,12 @@ class Module:
                                     field.dtype, field.snode.shape, row_num,
                                     column_num)
 
-    def add_ndarray(self, name, arr):
-        """Add a taichi ndarray to the AOT module.
-
-        Args:
-          name: name of taichi ndarray
-          arr: taichi ndarray
-
-        Example:
-          Usage::
-
-          a = ti.ndarray(ti.f32, shape=(4,4))
-
-          m.add_ndarray(a)
-        """
-        is_scalar = True
-        self._ndarrays[name] = arr
-        column_num = 1
-        row_num = 1
-        if isinstance(arr, MatrixNdarray):
-            is_scalar = False
-            row_num = arr.m
-            column_num = arr.n
-        elif isinstance(arr, VectorNdarray):
-            is_scalar = False
-            column_num = arr.n
-        else:
-            assert isinstance(arr, Ndarray)
-        self._aot_builder.add_ndarray(name, is_scalar, arr.dtype, arr.shape,
-                                      row_num, column_num)
-
-    def add_kernel(self, kernel_fn, example_any_arrays=(), name=None):
+    def add_kernel(self, kernel_fn, example_any_arrays=None, name=None):
         """Add a taichi kernel to the AOT module.
 
         Args:
           kernel_fn (Function): the function decorated by taichi `kernel`.
-          example_any_arrays (Tuple[any_arr]): a tuple of example any_arr inputs.
+          example_any_arrays (Dict[int, ti.ndarray]): a dict where key is arg_id and key is example any_arr input.
           name (str): Name to identify this kernel in the module. If not
             provided, uses the built-in ``__name__`` attribute of `kernel_fn`.
 
@@ -169,18 +140,39 @@ class Module:
             anno for anno in kernel.argument_annotations
             if isinstance(anno, ArgAnyArray)
         ])
-        assert num_arr == len(
+        assert example_any_arrays is None or num_arr == len(
             example_any_arrays
         ), f'Need {num_arr} example any_arr inputs but got {len(example_any_arrays)}'
         i = 0
         for anno in kernel.argument_annotations:
             if isinstance(anno, ArgAnyArray):
-                # TODO: maybe also save example_any_arrays variable names?
-                injected_args.append(example_any_arrays[i])
-                i = i + 1
+                if example_any_arrays:
+                    injected_args.append(example_any_arrays[i])
+                else:
+                    assert anno.element_shapes is not None and anno.field_dim is not None, 'Please either specify element_shapes & field_dim in the kernel arg annotation or provide a dict of example ndarrays.'
+                    if anno.element_dim == 0:
+                        injected_args.append(
+                            ScalarNdarray(dtype=f32,
+                                          shape=(2, ) * anno.field_dim))
+                    elif anno.element_dim == 1:
+                        injected_args.append(
+                            VectorNdarray(anno.element_shapes[0],
+                                          dtype=f32,
+                                          shape=(2, ) * anno.field_dim,
+                                          layout=Layout.AOS))
+                    elif anno.element_dim == 2:
+                        injected_args.append(
+                            MatrixNdarray(anno.element_shapes[0],
+                                          anno.element_shapes[1],
+                                          dtype=f32,
+                                          shape=(2, ) * anno.field_dim,
+                                          layout=Layout.AOS))
+                    else:
+                        raise RuntimeError('')
             else:
                 # For primitive types, we can just inject a dummy value.
                 injected_args.append(0)
+            i = i + 1
         kernel.ensure_compiled(*injected_args)
         self._aot_builder.add(name, kernel.kernel_cpp)
 
