@@ -103,9 +103,10 @@ class VkRuntime {
 
   DevicePtr get_snode_tree_device_ptr(int tree_id);
 
+  void add_root_buffer(size_t root_buffer_size);
+
  private:
   void init_buffers();
-  void add_root_buffer(size_t root_buffer_size);
 
   Device *device_;
 
@@ -123,7 +124,10 @@ class VkRuntime {
   std::vector<CompiledSNodeStructs> compiled_snode_structs_;
 };
 
-VkRuntime::RegisterParams run_codegen(Kernel *kernel, VkRuntime *runtime);
+VkRuntime::RegisterParams run_codegen(
+    Kernel *kernel,
+    Device *device,
+    const std::vector<CompiledSNodeStructs> &compiled_structs);
 
 }  // namespace vulkan
 }  // namespace lang

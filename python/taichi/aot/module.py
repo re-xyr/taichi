@@ -6,8 +6,8 @@ from taichi.lang._ndarray import ScalarNdarray
 from taichi.lang.enums import Layout
 from taichi.lang.field import ScalarField
 from taichi.lang.matrix import MatrixField, MatrixNdarray, VectorNdarray
-from taichi.type.annotations import ArgAnyArray, template
-from taichi.type.primitive_types import f32
+from taichi.types.annotations import ArgAnyArray, template
+from taichi.types.primitive_types import f32
 
 
 class KernelTemplate:
@@ -21,7 +21,7 @@ class KernelTemplate:
             key_p += '=' + str(v) + ','
             return key_p
         for ky, val in fields:
-            if (val is v):
+            if val is v:
                 key_p += '=' + ky + ','
                 return key_p
         raise RuntimeError('Arg type must be of type int/float/boolean' +
@@ -97,16 +97,15 @@ class Module:
           name: name of taichi field
           field: taichi field
 
-        Example:
-          Usage::
+        Example::
 
-          a = ti.field(ti.f32, shape=(4,4))
-          b = ti.field("something")
-
-          m.add_field(a)
-          m.add_field(b)
-
-          # Must add in sequence
+            >>> a = ti.field(ti.f32, shape=(4,4))
+            >>> b = ti.field("something")
+            >>>
+            >>> m.add_field(a)
+            >>> m.add_field(b)
+            >>>
+            >>> # Must add in sequence
         """
         is_scalar = True
         self._fields[name] = field
@@ -149,21 +148,21 @@ class Module:
                 if example_any_arrays:
                     injected_args.append(example_any_arrays[i])
                 else:
-                    assert anno.element_shapes is not None and anno.field_dim is not None, 'Please either specify element_shapes & field_dim in the kernel arg annotation or provide a dict of example ndarrays.'
+                    assert anno.element_shape is not None and anno.field_dim is not None, 'Please either specify element_shape & field_dim in the kernel arg annotation or provide a dict of example ndarrays.'
                     if anno.element_dim == 0:
                         injected_args.append(
                             ScalarNdarray(dtype=f32,
                                           shape=(2, ) * anno.field_dim))
                     elif anno.element_dim == 1:
                         injected_args.append(
-                            VectorNdarray(anno.element_shapes[0],
+                            VectorNdarray(anno.element_shape[0],
                                           dtype=f32,
                                           shape=(2, ) * anno.field_dim,
                                           layout=Layout.AOS))
                     elif anno.element_dim == 2:
                         injected_args.append(
-                            MatrixNdarray(anno.element_shapes[0],
-                                          anno.element_shapes[1],
+                            MatrixNdarray(anno.element_shape[0],
+                                          anno.element_shape[1],
                                           dtype=f32,
                                           shape=(2, ) * anno.field_dim,
                                           layout=Layout.AOS))
@@ -186,28 +185,27 @@ class Module:
         Args:
           kernel_fn (Function): the function decorated by taichi `kernel`.
 
-        Example:
-          Usage::
+        Example::
 
-            @ti.kernel
-            def bar_tmpl(a: ti.template()):
-              x = a
-              # or y = a
-              # do something with `x` or `y`
-
-            m = ti.aot.Module(arch)
-            with m.add_kernel_template(bar_tmpl) as kt:
-              kt.instantiate(a=x)
-              kt.instantiate(a=y)
-
-            @ti.kernel
-            def bar_tmpl_multiple_args(a: ti.template(), b: ti.template())
-              x = a
-              y = b
-              # do something with `x` and `y`
-
-            with m.add_kernel_template(bar_tmpl) as kt:
-              kt.instantiate(a=x, b=y)
+            >>> @ti.kernel
+            >>> def bar_tmpl(a: ti.template()):
+            >>>   x = a
+            >>>   # or y = a
+            >>>   # do something with `x` or `y`
+            >>>
+            >>> m = ti.aot.Module(arch)
+            >>> with m.add_kernel_template(bar_tmpl) as kt:
+            >>>   kt.instantiate(a=x)
+            >>>   kt.instantiate(a=y)
+            >>>
+            >>> @ti.kernel
+            >>> def bar_tmpl_multiple_args(a: ti.template(), b: ti.template())
+            >>>   x = a
+            >>>   y = b
+            >>>   # do something with `x` and `y`
+            >>>
+            >>> with m.add_kernel_template(bar_tmpl) as kt:
+            >>>   kt.instantiate(a=x, b=y)
 
         TODO:
           * Support external array
