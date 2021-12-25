@@ -23,6 +23,7 @@ DeviceAllocation CudaDevice::allocate_memory(const AllocParams &params) {
   info.size = params.size;
   info.is_imported = false;
   info.use_cached = false;
+  info.use_preallocated = false;
 
   DeviceAllocation alloc;
   alloc.alloc_id = allocations_.size();
@@ -35,6 +36,7 @@ DeviceAllocation CudaDevice::allocate_memory(const AllocParams &params) {
 DeviceAllocation CudaDevice::allocate_memory_runtime(
     const LlvmRuntimeAllocParams &params) {
   AllocInfo info;
+  info.size = taichi::iroundup(params.size, taichi_page_size);
   if (params.host_read || params.host_write) {
     TI_NOT_IMPLEMENTED
   } else if (params.use_cached) {
@@ -42,12 +44,13 @@ DeviceAllocation CudaDevice::allocate_memory_runtime(
       caching_allocator_ = std::make_unique<CudaCachingAllocator>(this);
     }
     info.ptr = caching_allocator_->allocate(params);
+    CUDADriver::get_instance().memset((void *)info.ptr, 0, info.size);
   } else {
     info.ptr = allocate_llvm_runtime_memory_jit(params);
   }
-  info.size = taichi::iroundup(params.size, taichi_page_size);
   info.is_imported = false;
   info.use_cached = params.use_cached;
+  info.use_preallocated = true;
 
   DeviceAllocation alloc;
   alloc.alloc_id = allocations_.size();
@@ -69,7 +72,7 @@ void CudaDevice::dealloc_memory(DeviceAllocation handle) {
       TI_ERROR("the CudaCachingAllocator is not initialized");
     }
     caching_allocator_->release(info.size, (uint64_t *)info.ptr);
-  } else {
+  } else if (!info.use_preallocated) {
     CUDADriver::get_instance().mem_free(info.ptr);
     info.ptr = nullptr;
   }
